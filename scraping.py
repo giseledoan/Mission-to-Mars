@@ -1,89 +1,103 @@
-# # Import Splinter and BeautifulSoup
+# Import Splinter, BeautifulSoup, and Pandas
 from splinter import Browser
 from bs4 import BeautifulSoup as soup
-from webdriver_manager.chrome import ChromeDriverManager
 import pandas as pd
-
-# Set up Splinter (path and browser)
-executable_path = {'executable_path': ChromeDriverManager().install()}
-browser = Browser('chrome', **executable_path, headless=False)
-#executable_path: unpack the dic we've stored the path in.
-#headless=false: all of the browser's actions will be displayed in a Chrome window so we can see them.
-
-# Assign the url and instruct the browser to visit it
-# Visit the mars nasa news site
-url = 'https://redplanetscience.com'
-browser.visit(url)
-# Optional delay for loading the page
-browser.is_element_present_by_css('div.list_text', wait_time=1)
-
-# set up the HTML parser
-html = browser.html
-news_soup = soup(html, 'html.parser')
-slide_elem = news_soup.select_one('div.list_text')
-#. is used to select classes (list_text). 'div.list_text' = <div /> tag w the class of list_text.
-
-#looking for a <div /> with a class of “content_title.” to identify the title.
-slide_elem.find('div', class_='content_title')
+import datetime as dt
+from webdriver_manager.chrome import ChromeDriverManager
 
 
-# Use the parent element to find the first `a` tag and save it as `news_title`
-news_title = slide_elem.find('div', class_='content_title').get_text()
-news_title
+def scrape_all():
+    # Initiate headless driver for deployment
+    executable_path = {'executable_path': ChromeDriverManager().install()}
+    browser = Browser('chrome', **executable_path, headless=True)
 
-# Use the parent element to find the paragraph text
-news_p = slide_elem.find('div', class_='article_teaser_body').get_text()
-news_p
+    news_title, news_paragraph = mars_news(browser)
 
+    # Run all scraping functions and store results in a dictionary
+    data = {
+        "news_title": news_title,
+        "news_paragraph": news_paragraph,
+        "featured_image": featured_image(browser),
+        "facts": mars_facts(),
+        "last_modified": dt.datetime.now()
+    }
 
-# ### Featured Images
-
-# Scrape image of another website
-# Visit URL
-url = 'https://spaceimages-mars.com'
-browser.visit(url)
-
-
-# Find and click the full image button
-# The browser finds an element by its tag. [1] = we want our browser to click the 2nd button
-full_image_elem = browser.find_by_tag('button')[1]
-# Splinter will click the image to view its full size
-full_image_elem.click()
-
-#after running this code, the automated browser auto "clicks" the button and change the view to an image
-
-# Parse the resulting html with soup
-html = browser.html
-img_soup = soup(html, 'html.parser')
+    # Stop webdriver and return data
+    browser.quit()
+    return data
 
 
-# Find the relative image url (on the automated browser)
-img_url_rel = img_soup.find('img', class_='fancybox-image').get('src')
-img_url_rel
+def mars_news(browser):
+
+    # Scrape Mars News
+    # Visit the mars nasa news site
+    url = 'https://data-class-mars.s3.amazonaws.com/Mars/index.html'
+    browser.visit(url)
+
+    # Optional delay for loading the page
+    browser.is_element_present_by_css('div.list_text', wait_time=1)
+
+    # Convert the browser html to a soup object and then quit the browser
+    html = browser.html
+    news_soup = soup(html, 'html.parser')
+
+    # Add try/except for error handling
+    try:
+        slide_elem = news_soup.select_one('div.list_text')
+        # Use the parent element to find the first 'a' tag and save it as 'news_title'
+        news_title = slide_elem.find('div', class_='content_title').get_text()
+        # Use the parent element to find the paragraph text
+        news_p = slide_elem.find('div', class_='article_teaser_body').get_text()
+
+    except AttributeError:
+        return None, None
+
+    return news_title, news_p
 
 
-# Use the base URL to create an absolute URL
-img_url = f'https://spaceimages-mars.com/{img_url_rel}'
-img_url
+def featured_image(browser):
+    # Visit URL
+    url = 'https://data-class-jpl-space.s3.amazonaws.com/JPL_Space/index.html'
+    browser.visit(url)
 
-# scrape the entire table in https://galaxyfacts-mars.com/
-# Use read_html() search for & returns a list of tables found in the HTML
-df = pd.read_html('https://galaxyfacts-mars.com')[0] #index 0 = pull only the first table it encounters
+    # Find and click the full image button
+    full_image_elem = browser.find_by_tag('button')[1]
+    full_image_elem.click()
 
-# assign columns to the new DataFrame for additional clarity
-df.columns=['description', 'Mars', 'Earth']
+    # Parse the resulting html with soup
+    html = browser.html
+    img_soup = soup(html, 'html.parser')
 
-#turning the Description column into the DataFrame's index
-df.set_index('description', inplace=True) #inplace=True: the updated index will remain in place, no reassign the DataFrame to a new variable
-df
+    # Add try/except for error handling
+    try:
+        # Find the relative image url
+        img_url_rel = img_soup.find('img', class_='fancybox-image').get('src')
 
+    except AttributeError:
+        return None
 
-# convert DataFrame back into HTML-ready code
-df.to_html()
+    # Use the base url to create an absolute url
+    img_url = f'https://data-class-jpl-space.s3.amazonaws.com/JPL_Space/{img_url_rel}'
 
-#end the automated browsing session
-browser.quit()
+    return img_url
 
+def mars_facts():
+    # Add try/except for error handling
+    try:
+        # Use 'read_html' to scrape the facts table into a dataframe
+        df = pd.read_html('https://data-class-mars-facts.s3.amazonaws.com/Mars_Facts/index.html')[0]
 
+    except BaseException:
+        return None
 
+    # Assign columns and set index of dataframe
+    df.columns=['Description', 'Mars', 'Earth']
+    df.set_index('Description', inplace=True)
 
+    # Convert dataframe into HTML format, add bootstrap
+    return df.to_html(classes="table table-striped")
+
+if __name__ == "__main__":
+
+    # If running as script, print scraped data
+    print(scrape_all())
